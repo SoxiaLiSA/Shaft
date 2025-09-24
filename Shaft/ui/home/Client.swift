@@ -75,16 +75,17 @@ actor TokenRefresher {
 
             do {
                 let decoder = JSONDecoder()
-                decoder.keyDecodingStrategy = .convertFromSnakeCase // Pixiv API 常用下划线
+                // 不使用 keyDecodingStrategy，直接用 CodingKeys 映射
                 let tokenData = try decoder.decode(TokenData.self, from: data)
+
                 print("[Token] 解码成功: accessToken=\(tokenData.accessToken), refreshToken=\(tokenData.refreshToken)")
-                
                 AuthManager.shared.updateTokenData(tokenData: tokenData)
                 return tokenData.accessToken
             } catch {
                 print("[Token] JSON 解码失败: \(error)")
                 throw error
             }
+
         }
 
         refreshingTask = task
