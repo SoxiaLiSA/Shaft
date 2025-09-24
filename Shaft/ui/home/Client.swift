@@ -7,205 +7,296 @@
 
 import Foundation
 import CryptoKit
+import Alamofire
 
-
-
-final class Client {
-    static let shared = Client()
-
-    private init() {}
-
-    // MARK: - API 基础 URL
-    private let appApiHost = "https://app-api.pixiv.net"
-    private let oauthHost = "https://oauth.secure.pixiv.net"
-    private let webApiHost = "https://www.pixiv.net"
-
-
-    // MARK: - 公共 Header
-    private func makeHeaders(needToken: Bool) -> [String: String] {
-        var headers: [String: String] = [:]
-        let nonce = RequestNonce.build()
-        
-        if needToken {
-            if let token = AuthManager.shared.getToken() {
-                headers["authorization"] = "Bearer \(token)"
-                print("[Header] 使用 Token:", token)
-            } else {
-                print("[Header] 需要 Token，但 accessToken 为 nil")
-            }
-        } else {
-            print("[Header] 不需要 Token")
-        }
-        
-        
-        headers["accept-language"] = "zh_CN"
-        headers["app-os"] = "ios"
-        headers["app-version"] = "7.13.4"
-        headers["x-client-time"] = nonce.xClientTime
-        headers["x-client-hash"] = nonce.xClientHash
-        headers["user-agent"] = "PixivIOSApp/7.13.4 (iOS 16.0; iPhone)"
-        
-        print("[Header] 完整 Header:", headers)
-        
-        return headers
-    }
-
-
-    func request<T: Codable>(
-        url: String,
-        base: Base? = .app,          // 改为可选
-        method: String = "GET",
-        body: Data? = nil,
-        needToken: Bool = true
-    ) async throws -> T {
-
-        let fullUrl: URL
-        if url.hasPrefix("http") {
-            // 如果传入完整 URL，直接使用
-            guard let u = URL(string: url) else {
-                throw URLError(.badURL)
-            }
-            fullUrl = u
-        } else {
-            // 仍然使用 base 拼接
-            switch base {
-            case .app:
-                fullUrl = URL(string: appApiHost + url)!
-            case .oauth:
-                fullUrl = URL(string: oauthHost + url)!
-            case .web:
-                fullUrl = URL(string: webApiHost + url)!
-            case .none:
-                throw URLError(.badURL) // base 为 nil，但 url 不是完整 URL
-            }
-        }
-
-
-        var request = URLRequest(url: fullUrl)
-        request.httpMethod = method
-        request.httpBody = body
-        makeHeaders(needToken: needToken).forEach { key, value in
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-
-        print("发起请求 URL:", fullUrl)
-        print("请求 Header:", request.allHTTPHeaderFields ?? [:])
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        if let httpResponse = response as? HTTPURLResponse {
-            print("HTTP 状态码:", httpResponse.statusCode)
-        }
-
-        if let json = String(data: data, encoding: .utf8) {
-            print("返回 JSON:", json)
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              200..<300 ~= httpResponse.statusCode else {
-            throw URLError(.badServerResponse)
-        }
-
-        do {
-            return try JSONDecoder().decode(T.self, from: data)
-        } catch {
-            print("JSON 解析失败:", error)
-            throw error
-        }
-    }
-
-
-    enum Base {
-        case app
-        case oauth
-        case web
-    }
+struct TokenError {
+    static let error1 = "Error occurred at the OAuth process"
+    static let error2 = "Invalid refresh token"
 }
 
 
 actor TokenRefresher {
     private var refreshingTask: Task<String, Error>? = nil
-
-    /// 保证同一时间只刷新一次 token
+    
     func refreshIfNeeded(oldToken: String) async throws -> String {
-        // 如果已有刷新任务，直接等待结果
         if let task = refreshingTask {
+            print("[Token] 已有刷新任务，等待结果")
             return try await task.value
         }
 
-        // 没有刷新任务，则创建一个
         let task = Task<String, Error> {
-            defer { refreshingTask = nil } // 完成后清理
+            defer { refreshingTask = nil }
             print("[Token] 开始刷新 token")
-            let newToken = "newly_token"
-            AuthManager.shared.saveToken(newToken)
-            return newToken
+
+            // 请求参数
+            let form: [String: String] = [
+                "client_id": "MOBrBDS8blbauoSck0ZfDbtuzpyT",
+                "client_secret": "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj",
+                "grant_type": "refresh_token",
+                "refresh_token": AuthManager.shared.getRefreshToken() ?? "",
+                "include_policy": "true"
+            ]
+            print("[Token] 请求参数: \(form)")
+
+            // 发起请求
+            let dataResponse = await AF.request(
+                "https://oauth.secure.pixiv.net/auth/token",
+                method: .post,
+                parameters: form,
+                encoder: URLEncodedFormParameterEncoder.default
+            )
+            .serializingData()
+            .response
+
+            // 状态码
+            if let status = dataResponse.response?.statusCode {
+                print("[Token] HTTP 状态码: \(status)")
+            } else {
+                print("[Token] 未收到 HTTP 响应")
+            }
+
+            // 响应内容
+            if let data = dataResponse.data, let jsonString = String(data: data, encoding: .utf8) {
+                print("[Token] 响应内容: \(jsonString)")
+            } else {
+                print("[Token] 响应内容为空")
+            }
+
+            // 检查状态码
+            guard let status = dataResponse.response?.statusCode, 200..<300 ~= status else {
+                throw URLError(.badServerResponse)
+            }
+
+            // 解码
+            guard let data = dataResponse.data else {
+                print("[Token] 无法获取数据解码")
+                throw URLError(.cannotDecodeRawData)
+            }
+
+            do {
+                let decoder = JSONDecoder()
+                decoder.keyDecodingStrategy = .convertFromSnakeCase // Pixiv API 常用下划线
+                let tokenData = try decoder.decode(TokenData.self, from: data)
+                print("[Token] 解码成功: accessToken=\(tokenData.accessToken), refreshToken=\(tokenData.refreshToken)")
+                
+                AuthManager.shared.updateTokenData(tokenData: tokenData)
+                return tokenData.accessToken
+            } catch {
+                print("[Token] JSON 解码失败: \(error)")
+                throw error
+            }
         }
 
         refreshingTask = task
         return try await task.value
     }
+
+
+
 }
 
 
 
-let tokenRefresher = TokenRefresher()
+let tokenRefresher = TokenRefresher() // <- 这是全局实例
 
-extension Client {
-    
-    /// 获取推荐榜单
-        func getRecmdIllust() async throws -> RecmdIllust {
-            let endpoint = "/v1/illust/recommended?include_privacy_policy=true&filter=for_android&include_ranking_illusts=false"
-            return try await request(url: endpoint, base: .app, method: "GET", needToken: true)
+
+import Alamofire
+
+final class Client {
+    static let shared = Client()
+    private init() {}
+
+    private let tokenRefresher = TokenRefresher()
+
+    enum Base { case app, oauth, web }
+
+    private let appApiHost = "https://app-api.pixiv.net"
+    private let oauthHost = "https://oauth.secure.pixiv.net"
+    private let webApiHost = "https://www.pixiv.net"
+
+    private func makeHeaders(needToken: Bool) -> HTTPHeaders {
+        var headers = HTTPHeaders() // <-- Alamofire 5+ 正确初始化方式
+        let nonce = RequestNonce.build()
+
+        if needToken, let token = AuthManager.shared.getToken() {
+            headers.add(name: "Authorization", value: "Bearer \(token)")
         }
+
+        headers.add(name: "Accept-Language", value: "zh_CN")
+        headers.add(name: "App-OS", value: "ios")
+        headers.add(name: "App-Version", value: "7.13.4")
+        headers.add(name: "X-Client-Time", value: nonce.xClientTime)
+        headers.add(name: "X-Client-Hash", value: nonce.xClientHash)
+        headers.add(name: "User-Agent", value: "PixivIOSApp/7.13.4 (iOS 16.0; iPhone)")
+
+        return headers
+    }
+
+
+    private func isTokenError(data: Data?) -> Bool {
+        guard let jsonString = data.flatMap({ String(data: $0, encoding: .utf8) }) else {
+            return false
+        }
+        return jsonString.contains(TokenError.error1) || jsonString.contains(TokenError.error2)
+    }
+
     
-    
-    
-    /// 判断接口返回是否是 token 错误
-       func isTokenError(response: HTTPURLResponse, data: Data?) -> Bool {
-           // 1️⃣ 先判断状态码
-           guard response.statusCode == 400 else { return false }
-           
-           // 2️⃣ 转成字符串
-           guard let jsonString = data.flatMap({ String(data: $0, encoding: .utf8) }) else {
-               return false
-           }
-           
-           // 3️⃣ 判断是否包含 token 错误标识
-           return jsonString.contains("Error occurred at the OAuth process") ||
-                  jsonString.contains("Invalid refresh token")
-       }
-    
-    
+    func request<T: Codable>(
+        url: String,
+        base: Base? = .app,
+        method: HTTPMethod = .get,
+        body: Data? = nil,            // JSON body
+        encoder: ParameterEncoder = JSONParameterEncoder.default,
+        needToken: Bool = true
+    ) async throws -> T {
+        
+        let fullUrl: String
+        switch base {
+        case .app: fullUrl = appApiHost + url
+        case .oauth: fullUrl = oauthHost + url
+        case .web: fullUrl = webApiHost + url
+        case .none: throw URLError(.badURL)
+        }
+
+        let headers = makeHeaders(needToken: needToken)
+        
+        // 打印请求信息
+        print("➡️ Request URL: \(fullUrl)")
+        print("➡️ Method: \(method.rawValue)")
+        if let body = body, let bodyString = String(data: body, encoding: .utf8) {
+            print("➡️ Body: \(bodyString)")
+        }
+        print("➡️ Headers: \(headers)")
+
+        let dataResponse: DataResponse<Data, AFError> = await AF.request(
+            fullUrl,
+            method: method,
+            headers: headers
+        ) { request in
+            if let body = body {
+                request.httpBody = body
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            }
+        }
+        .validate(statusCode: 200..<300) // <- 关键
+        .serializingData()
+        .response
+
+        if let status = dataResponse.response?.statusCode {
+            print("⬅️ Status code: \(status)")
+        } else {
+            print("⬅️ No response status code")
+        }
+
+        if let data = dataResponse.data,
+           let dataString = String(data: data, encoding: .utf8) {
+            print("⬅️ Response data: \(dataString)")
+        } else {
+            print("⬅️ No response data")
+        }
+
+        guard let status = dataResponse.response?.statusCode, 200..<300 ~= status else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard let data = dataResponse.data else {
+            throw URLError(.cannotDecodeRawData)
+        }
+
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+
+
+}
+
+
+// MARK: - 自动刷新 Token
+extension Client {
 
     func requestWithAutoRefresh<T: Codable>(
         url: String,
         base: Base? = .app,
-        method: String = "GET",
+        method: HTTPMethod = .get,
         body: Data? = nil,
+        encoder: ParameterEncoder = JSONParameterEncoder.default,
         needToken: Bool = true
     ) async throws -> T {
-        
-        do {
-            return try await request(url: url, base: base, method: method, body: body, needToken: needToken)
-        } catch {
-//            // 捕获请求失败的错误
-//            if let responseError = error as? HTTPError,  // 你 request 方法里面可以把响应码封装成 HTTPError
-//               let httpResponse = responseError.response,
-//               let data = responseError.data,
-//               isTokenError(response: httpResponse, data: data),
-//               let oldToken = AuthManager.shared.getToken() {
-//
-//                // 刷新 token（同一时间只刷新一次）
-//                let newToken = try await tokenRefresher.refreshIfNeeded(oldToken: oldToken)
-//
-//                // 使用新 token 重试一次
-//                return try await request(url: url, base: base, method: method, body: body, needToken: needToken)
-//            } else {
-//
-//            }
-            throw error
+
+        print("🔹 [AutoRefresh] 开始请求: \(url)")
+
+        // 封装一个内部方法，支持重试
+        func performRequest() async throws -> T {
+            let fullUrl: String
+            switch base {
+            case .app: fullUrl = appApiHost + url
+            case .oauth: fullUrl = oauthHost + url
+            case .web: fullUrl = webApiHost + url
+            case .none: throw URLError(.badURL)
+            }
+
+            let headers = makeHeaders(needToken: needToken)
+
+            print("➡️ Request URL: \(fullUrl)")
+            print("➡️ Method: \(method.rawValue)")
+            if let body = body, let bodyString = String(data: body, encoding: .utf8) {
+                print("➡️ Body: \(bodyString)")
+            }
+            print("➡️ Headers: \(headers)")
+
+            let dataResponse: DataResponse<Data, AFError> = await AF.request(
+                fullUrl,
+                method: method,
+                headers: headers
+            ) { request in
+                if let body = body {
+                    request.httpBody = body
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                }
+            }
+            .serializingData()
+            .response
+
+            if let status = dataResponse.response?.statusCode {
+                print("⬅️ Status code: \(status)")
+            }
+
+            let data = dataResponse.data ?? Data()
+            if let dataString = String(data: data, encoding: .utf8) {
+                print("⬅️ Response data: \(dataString)")
+            }
+
+            // 检查返回 JSON 是否包含 token 错误文案
+            if isTokenError(data: data), let oldToken = AuthManager.shared.getToken() {
+                print("[Token] 检测到 Token 错误，旧 Token: \(oldToken)")
+                let newToken = try await tokenRefresher.refreshIfNeeded(oldToken: oldToken)
+                print("[Token] 刷新完成，新 Token: \(newToken)")
+                return try await performRequest() // 重试
+            }
+
+            // 检查 HTTP 状态码
+            if let status = dataResponse.response?.statusCode, !(200..<300).contains(status) {
+                throw URLError(.badServerResponse)
+            }
+
+            return try JSONDecoder().decode(T.self, from: data)
         }
+
+        return try await performRequest()
     }
+}
+
+
+
+struct Empty: Encodable {}
+
+// MARK: - 示例接口
+extension Client {
+    
+    
+    func getRecmdIllust() async throws -> RecmdIllust {
+        let endpoint = "/v1/illust/recommended?include_privacy_policy=true&filter=for_android&include_ranking_illusts=false"
+        return try await requestWithAutoRefresh(url: endpoint, base: .app, method: .get, needToken: true)
+    }
+
 
 }

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F20BA7912E83B491005327D1 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = F20BA7902E83B491005327D1 /* Alamofire */; };
 		F29877532E829C4E005F6C4A /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = F29877522E829C4E005F6C4A /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F29877532E829C4E005F6C4A /* Kingfisher in Frameworks */,
+				F20BA7912E83B491005327D1 /* Alamofire in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = Shaft;
 			packageProductDependencies = (
 				F29877522E829C4E005F6C4A /* Kingfisher */,
+				F20BA7902E83B491005327D1 /* Alamofire */,
 			);
 			productName = Shaft;
 			productReference = F29876EF2E8280CD005F6C4A /* Shaft.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				F29877512E829C4E005F6C4A /* XCRemoteSwiftPackageReference "Kingfisher" */,
+				F20BA78F2E83B491005327D1 /* XCRemoteSwiftPackageReference "Alamofire" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = F29876F02E8280CD005F6C4A /* Products */;
@@ -339,6 +343,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		F20BA78F2E83B491005327D1 /* XCRemoteSwiftPackageReference "Alamofire" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "git@github.com:Alamofire/Alamofire.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.10.2;
+			};
+		};
 		F29877512E829C4E005F6C4A /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
@@ -350,6 +362,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		F20BA7902E83B491005327D1 /* Alamofire */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F20BA78F2E83B491005327D1 /* XCRemoteSwiftPackageReference "Alamofire" */;
+			productName = Alamofire;
+		};
 		F29877522E829C4E005F6C4A /* Kingfisher */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F29877512E829C4E005F6C4A /* XCRemoteSwiftPackageReference "Kingfisher" */;

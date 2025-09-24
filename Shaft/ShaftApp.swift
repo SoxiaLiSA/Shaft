@@ -47,7 +47,21 @@ class AuthManager: ObservableObject {
         return try? JSONDecoder().decode(TokenData.self, from: data).accessToken
     }
     
-    func saveToken(_ newToken: String) { }
+    func getRefreshToken() -> String? {
+        guard let data = UserDefaults.standard.data(forKey: tokenKey) else { return nil }
+        return try? JSONDecoder().decode(TokenData.self, from: data).refreshToken
+    }
+    
+    func updateTokenData(tokenData: TokenData) {
+        do {
+            let data = try JSONEncoder().encode(tokenData)
+            UserDefaults.standard.set(data, forKey: tokenKey)
+            isLoggedIn = true
+            print("[AuthManager] token 已更新")
+        } catch {
+            print("[AuthManager] 更新 token 失败:", error)
+        }
+    }
 }
 
 
