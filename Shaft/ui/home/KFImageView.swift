@@ -18,8 +18,11 @@ struct KFImageView: View {
                 request.setValue("https://www.pixiv.net/", forHTTPHeaderField: "Referer")
             }
             .placeholder {
-                ProgressView()
-                    .frame(maxWidth: .infinity, minHeight: 150)
+                ZStack {
+                    Color.black.opacity(0.1)
+                    ProgressView()
+                }
+                .frame(maxWidth: .infinity, minHeight: 150)
             }
             .onSuccess { result in
                 print("[KFImage] 加载成功:", url)

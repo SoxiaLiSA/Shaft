@@ -40,44 +40,72 @@ struct DiscoverView: View {
 
     let sideSpacing: CGFloat = 8
     let columnSpacing: CGFloat = 8
-
+    
+    @State private var didLoadData = false
+    @State private var isLoading: Bool = true // 🔹 加载状态
+    
     var body: some View {
-        ScrollView {
-            HStack(alignment: .top, spacing: columnSpacing) {
-                LazyVStack(spacing: columnSpacing) {
-                    ForEach(leftColumn, id: \.id) { illust in
-                        IllustCell(illust: illust)
-                    }
-                }
-                .padding(.leading, sideSpacing)
+        NavigationStack {
+            ZStack {
+                GeometryReader { geo in
+                    ScrollView {
+                        HStack(alignment: .top, spacing: columnSpacing) {
+                            LazyVStack(spacing: columnSpacing) {
+                                ForEach(leftColumn) { illust in
+                                    NavigationLink(destination: IllustDetailView(illust: illust)) {
+                                        IllustCell(illust: illust)
+                                            .frame(width: (geo.size.width - sideSpacing * 3) / 2)
+                                    }
+                                }
+                            }
+                            .padding(.leading, sideSpacing)
 
-                LazyVStack(spacing: columnSpacing) {
-                    ForEach(rightColumn, id: \.id) { illust in
-                        IllustCell(illust: illust)
+                            LazyVStack(spacing: columnSpacing) {
+                                ForEach(rightColumn) { illust in
+                                    NavigationLink(destination: IllustDetailView(illust: illust)) {
+                                        IllustCell(illust: illust)
+                                            .frame(width: (geo.size.width - sideSpacing * 3) / 2)
+                                    }
+                                }
+                            }
+                            .padding(.trailing, sideSpacing)
+                        }
+                    }
+                    .disabled(isLoading) // 🔹 加载中禁止滚动
+                    .onAppear {
+                        if !didLoadData {
+                            Task {
+                                await viewModel.fetchData()
+                                distributeColumns(containerWidth: geo.size.width)
+                                isLoading = false
+                                didLoadData = true
+                            }
+                        }
                     }
                 }
-                .padding(.trailing, sideSpacing)
+                
+                // 🔹 加载圆环
+                if isLoading {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .accentColor))
+                        .scaleEffect(2) // 放大圆环
+                }
             }
-        }
-
-        .task {
-            await viewModel.fetchData()
-            distributeColumns()
+            .navigationTitle("推荐插画")
         }
     }
-    
-    func distributeColumns() {
+
+    func distributeColumns(containerWidth: CGFloat) {
         leftColumn = []
         rightColumn = []
         var leftHeight: CGFloat = 0
         var rightHeight: CGFloat = 0
-        
-        let totalWidth = UIScreen.main.bounds.width
-        let columnWidth = (totalWidth - sideSpacing * 3) / 2 // 左 8 + 中间 8 + 右 8
+
+        let columnWidth = (containerWidth - sideSpacing * 3) / 2
 
         for illust in viewModel.recmdIllusts {
             let height = columnWidth / CGFloat(illust.width) * CGFloat(illust.height)
-            
+
             if leftHeight <= rightHeight {
                 leftColumn.append(illust)
                 leftHeight += height + columnSpacing
