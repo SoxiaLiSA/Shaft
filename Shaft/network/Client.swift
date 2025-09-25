@@ -144,3 +144,43 @@ extension Client {
         return try await requestWithAutoRefresh(url: endpoint, base: .app, method: .get, needToken: true)
     }
 }
+
+extension Client {
+    func generalGet(url: String) async throws -> Data {
+        print("🔹 [GeneralGet] 请求完整 URL: \(url)")
+
+        let headers = NetworkHeaders.makeHeaders(needToken: true)
+
+        let dataResponse: DataResponse<Data, AFError> = await AF.request(
+            url,
+            method: .get,
+            headers: headers
+        )
+        .serializingData()
+        .response
+
+        if let status = dataResponse.response?.statusCode {
+            print("⬅️ Status code: \(status)")
+        }
+
+        let data = dataResponse.data ?? Data()
+        if let dataString = String(data: data, encoding: .utf8) {
+            print("⬅️ Response data: \(dataString)")
+        }
+
+        // 检查 token 过期
+        if isTokenError(data), let oldToken = AuthManager.shared.getToken() {
+            print("[Token] 检测到 Token 错误，旧 Token: \(oldToken)")
+            let newToken = try await tokenRefresher.refreshIfNeeded(oldToken: oldToken)
+            print("[Token] 刷新完成，新 Token: \(newToken)")
+            return try await generalGet(url: url) // 🔄 重试
+        }
+
+        // 检查状态码
+        if let status = dataResponse.response?.statusCode, !(200..<300).contains(status) {
+            throw URLError(.badServerResponse)
+        }
+
+        return data
+    }
+}
